@@ -7,8 +7,7 @@ import {
 import { 
   Filter as FilterIcon, Search, X, ChevronDown, DollarSign, TrendingUp, 
   Receipt, Wallet, Target, CheckCircle2, Calendar, LayoutGrid, 
-  BarChart3, Layers, ShoppingCart, Ban, CreditCard, History, Trash2, ExternalLink,
-  Activity
+  BarChart3, Layers, ShoppingCart, Ban, CreditCard, History, Trash2, ExternalLink
 } from 'lucide-react';
 import { DashboardData, ViewMode, HistoryEntry } from '../types';
 
@@ -59,49 +58,31 @@ const Dashboard: React.FC<DashboardProps> = ({
     const prevMode = prevViewModeRef.current;
     
     if (!linkedFilters && prevMode !== viewMode) {
-      // Salva o estado atual na aba anterior
       setFiltersPersistence(prev => ({
         ...prev,
         [prevMode]: { ...filters }
       }));
-
-      // Carrega o estado da nova aba
       const savedForNewView = filtersPersistence[viewMode] || {};
       setFilters(savedForNewView);
     }
-    
     prevViewModeRef.current = viewMode;
   }, [viewMode, linkedFilters, filtersPersistence]);
 
-  // Carregar dados salvos do localStorage
+  // LocalStorage persistência
   useEffect(() => {
     const savedInvest = localStorage.getItem('utmdash_manual_invest');
     const savedFrozen = localStorage.getItem('utmdash_frozen_balance');
     const savedGroupInvest = localStorage.getItem('utmdash_group_invest');
-
     if (savedInvest) setManualInvestment(Number(savedInvest));
     if (savedFrozen) setFrozenBalance(Number(savedFrozen));
     if (savedGroupInvest) {
-      try {
-        setGroupInvestments(JSON.parse(savedGroupInvest));
-      } catch (e) {
-        console.error("Erro ao carregar investimentos de grupos", e);
-      }
+      try { setGroupInvestments(JSON.parse(savedGroupInvest)); } catch (e) {}
     }
   }, []);
 
-  // Salvar dados no localStorage sempre que mudarem
-  useEffect(() => {
-    localStorage.setItem('utmdash_manual_invest', manualInvestment.toString());
-  }, [manualInvestment]);
-
-  useEffect(() => {
-    localStorage.setItem('utmdash_frozen_balance', frozenBalance.toString());
-  }, [frozenBalance]);
-
-  useEffect(() => {
-    localStorage.setItem('utmdash_group_invest', JSON.stringify(groupInvestments));
-  }, [groupInvestments]);
+  useEffect(() => { localStorage.setItem('utmdash_manual_invest', manualInvestment.toString()); }, [manualInvestment]);
+  useEffect(() => { localStorage.setItem('utmdash_frozen_balance', frozenBalance.toString()); }, [frozenBalance]);
+  useEffect(() => { localStorage.setItem('utmdash_group_invest', JSON.stringify(groupInvestments)); }, [groupInvestments]);
 
   const rowsWithIndex = useMemo(() => {
     return data.rows.map((row, index) => ({ ...row, _id: index }));
@@ -121,6 +102,14 @@ const Dashboard: React.FC<DashboardProps> = ({
   const colContent = findHeader(['utm_content', 'conteúdo'], 33);
 
   const categoricalFilterCols = [colStatus, colProduto, colSource, colCampaign, colContent].filter(Boolean) as string[];
+
+  // Função para verificar se a linha é uma venda aprovada
+  const isApproved = (statusValue: any) => {
+    if (!statusValue) return false;
+    const s = String(statusValue).toLowerCase();
+    const approvedKeywords = ['aprovado', 'aprovada', 'pago', 'completo', 'disponivel', 'finalizado'];
+    return approvedKeywords.some(keyword => s.includes(keyword));
+  };
 
   const cleanUTMSource = (val: string) => {
     if (!val) return 'organic';
@@ -225,10 +214,7 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   const filterCounts = useMemo(() => {
     const counts: Record<string, Record<string, number>> = {};
-    categoricalFilterCols.forEach(col => {
-      counts[col] = {};
-    });
-
+    categoricalFilterCols.forEach(col => { counts[col] = {}; });
     filteredRows.forEach(row => {
       categoricalFilterCols.forEach(col => {
         let val = String(row[col] ?? 'N/A');
@@ -252,23 +238,28 @@ const Dashboard: React.FC<DashboardProps> = ({
       const statusVal = String(row[colStatus || ''] || 'N/A');
       const rowDateStr = String(row[colData || '']).split(' ')[0];
       const rVal = Number(row[colFaturamento || '']) || 0;
+      const approved = isApproved(statusVal);
 
       if (!groups[key]) {
         groups[key] = {
           source: s,
           campanha: c,
-          vendas: 0,
-          faturamento: 0,
+          vendas: 0, // Apenas aprovadas
+          faturamento: 0, // Apenas aprovadas
           minDate: rowDateStr,
           maxDate: rowDateStr,
           productsMap: {} as Record<string, number>,
-          statusMap: {} as Record<string, number>,
+          statusMap: {} as Record<string, number>, // Todos os status para visibilidade
           contents: new Set<string>(),
           key
         };
       }
-      groups[key].vendas += 1;
-      groups[key].faturamento += rVal;
+      
+      if (approved) {
+        groups[key].vendas += 1;
+        groups[key].faturamento += rVal;
+      }
+      
       groups[key].productsMap[prodName] = (groups[key].productsMap[prodName] || 0) + 1;
       groups[key].statusMap[statusVal] = (groups[key].statusMap[statusVal] || 0) + 1;
       groups[key].contents.add(content);
@@ -286,24 +277,23 @@ const Dashboard: React.FC<DashboardProps> = ({
   const periodStats = useMemo(() => {
     const today = new Date();
     today.setHours(0,0,0,0);
-    const d7 = new Date();
-    d7.setDate(today.getDate() - 7);
-    const d30 = new Date();
-    d30.setDate(today.getDate() - 30);
+    const d7 = new Date(); d7.setDate(today.getDate() - 7);
+    const d30 = new Date(); d30.setDate(today.getDate() - 30);
     let countToday = 0, count7 = 0, count30 = 0;
     rowsWithIndex.forEach(row => {
       const rDate = parseBrazilianDate(row[colData || '']);
-      if (!rDate) return;
+      if (!rDate || !isApproved(row[colStatus || ''])) return;
       if (rDate.toDateString() === today.toDateString()) countToday++;
       if (rDate >= d7) count7++;
       if (rDate >= d30) count30++;
     });
     return { today: countToday, d7: count7, d30: count30 };
-  }, [rowsWithIndex, colData]);
+  }, [rowsWithIndex, colData, colStatus]);
 
   const evolutionData = useMemo(() => {
     const daily: Record<string, number> = {};
     filteredRows.forEach(row => {
+      if (!isApproved(row[colStatus || ''])) return;
       const dateStr = String(row[colData || '']).split(' ')[0];
       daily[dateStr] = (daily[dateStr] || 0) + 1;
     });
@@ -314,12 +304,13 @@ const Dashboard: React.FC<DashboardProps> = ({
         const d2 = parseBrazilianDate(b.date) || new Date(0);
         return d1.getTime() - d2.getTime();
       });
-  }, [filteredRows, colData]);
+  }, [filteredRows, colData, colStatus]);
 
   const getTop5 = (colName: string | undefined) => {
     if (!colName) return [];
     const counts: Record<string, number> = {};
     filteredRows.forEach(row => {
+      if (!isApproved(row[colStatus || ''])) return;
       let val = String(row[colName] || 'N/A').trim();
       if (colName === colSource) val = cleanUTMSource(val);
       if (colName === colCampaign) val = cleanUTMCampaign(val);
@@ -328,14 +319,19 @@ const Dashboard: React.FC<DashboardProps> = ({
     return Object.entries(counts).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 5);
   };
 
-  const top5Campaigns = useMemo(() => getTop5(colCampaign), [filteredRows, colCampaign]);
-  const top5Source = useMemo(() => getTop5(colSource), [filteredRows, colSource]);
-  const top5Products = useMemo(() => getTop5(colProduto), [filteredRows, colProduto]);
+  const top5Campaigns = useMemo(() => getTop5(colCampaign), [filteredRows, colCampaign, colStatus]);
+  const top5Source = useMemo(() => getTop5(colSource), [filteredRows, colSource, colStatus]);
+  const top5Products = useMemo(() => getTop5(colProduto), [filteredRows, colProduto, colStatus]);
 
   const stats = useMemo(() => {
     let fat = 0;
-    filteredRows.forEach(row => { fat += Number(row[colFaturamento || '']) || 0; });
-    const vds = filteredRows.length;
+    let vds = 0;
+    filteredRows.forEach(row => { 
+      if (isApproved(row[colStatus || ''])) {
+        fat += Number(row[colFaturamento || '']) || 0; 
+        vds += 1;
+      }
+    });
     const imp = fat * 0.06;
     const gas = manualInvestment;
     const frz = frozenBalance;
@@ -346,7 +342,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     const ticket = vds > 0 ? fat / vds : 0;
 
     return { fat, gas, imp, luc, roas, vds, frz, cpa, ticket };
-  }, [filteredRows, colFaturamento, manualInvestment, frozenBalance]);
+  }, [filteredRows, colFaturamento, manualInvestment, frozenBalance, colStatus]);
 
   const formatBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -361,7 +357,7 @@ const Dashboard: React.FC<DashboardProps> = ({
       {viewMode === 'central' && (
         <div className="space-y-6 animate-in fade-in duration-500 w-full">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-            <StatCard title="Faturamento" value={formatBRL(stats.fat)} icon={<TrendingUp className="w-4 h-4" />} color="emerald" tag="Vendas" />
+            <StatCard title="Faturamento Aprovado" value={formatBRL(stats.fat)} icon={<TrendingUp className="w-4 h-4" />} color="emerald" tag="Líquido" />
             <div className="bg-white p-5 rounded-[28px] border border-slate-100 shadow-sm relative group overflow-hidden">
               <div className="relative z-10">
                 <div className="flex items-center justify-between mb-3">
@@ -375,7 +371,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 </div>
               </div>
             </div>
-            <StatCard title="Impostos" value={formatBRL(stats.imp)} icon={<Receipt className="w-4 h-4" />} color="amber" tag="6%" />
+            <StatCard title="Impostos (6%)" value={formatBRL(stats.imp)} icon={<Receipt className="w-4 h-4" />} color="amber" tag="Dedução" />
             <StatCard title="ROI / ROAS" value={`${stats.roas.toFixed(2)}x`} icon={<Target className="w-4 h-4" />} color="indigo" tag="Efficiency" />
             <div className="bg-indigo-600 p-5 rounded-[28px] shadow-xl text-white relative overflow-hidden group">
               <div className="relative z-10">
@@ -387,7 +383,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard title="Vendas Totais" value={stats.vds} icon={<ShoppingCart className="w-4 h-4" />} color="indigo" tag="Pedidos" />
+            <StatCard title="Vendas Aprovadas" value={stats.vds} icon={<ShoppingCart className="w-4 h-4" />} color="indigo" tag="Pedidos" />
             <div className="bg-white p-5 rounded-[28px] border border-slate-100 shadow-sm relative group overflow-hidden">
               <div className="relative z-10">
                 <div className="flex items-center justify-between mb-3">
@@ -401,7 +397,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 </div>
               </div>
             </div>
-            <StatCard title="CPA Médio" value={formatBRL(stats.cpa)} icon={<CreditCard className="w-4 h-4" />} color="slate" tag="Por Venda" />
+            <StatCard title="CPA Real" value={formatBRL(stats.cpa)} icon={<CreditCard className="w-4 h-4" />} color="slate" tag="Por Aprovada" />
             <StatCard title="Ticket Médio" value={formatBRL(stats.ticket)} icon={<Receipt className="w-4 h-4" />} color="emerald" tag="Por Pedido" />
           </div>
           <div className="bg-white p-6 rounded-[32px] border border-slate-200 shadow-sm space-y-8 w-full">
@@ -426,15 +422,11 @@ const Dashboard: React.FC<DashboardProps> = ({
             <div className="flex flex-col">
               <h4 className="font-black text-slate-800 tracking-tighter uppercase text-base flex items-center gap-2">
                 <Layers className="w-5 h-5 text-indigo-600" />
-                UTM PERFORMANCE AGRUPADO ({groupedPerformance.length} CLUSTERS)
+                UTM PERFORMANCE (MÉTRICAS DE APROVADOS)
               </h4>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">AGRUPADO POR SOURCE + CAMPAIGN</p>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">VENDAS E FATURAMENTO CALCULADOS APENAS PARA STATUS APROVADO</p>
             </div>
             <div className="flex items-center gap-6">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2"><div className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> <span className="text-[10px] font-black text-slate-500 uppercase">LUCRO POSITIVO</span></div>
-                <div className="flex items-center gap-2"><div className="w-2.5 h-2.5 rounded-full bg-rose-500" /> <span className="text-[10px] font-black text-slate-500 uppercase">PREJUÍZO</span></div>
-              </div>
               <button onClick={clearAllFilters} className="text-rose-500 text-[10px] font-black uppercase flex items-center gap-1 hover:opacity-70">
                 <X className="w-3 h-3" /> Resetar
               </button>
@@ -453,24 +445,19 @@ const Dashboard: React.FC<DashboardProps> = ({
                       </div>
                     </div>
                   </HeaderCell>
-                  <HeaderCell label="STATUS" width="110px" active={activeHeaderFilter === 'status'} onClick={() => setActiveHeaderFilter(activeHeaderFilter === 'status' ? null : 'status')} hasFilter={filters[colStatus || '']?.length > 0}>
+                  <HeaderCell label="STATUS (MIX)" width="120px" active={activeHeaderFilter === 'status'} onClick={() => setActiveHeaderFilter(activeHeaderFilter === 'status' ? null : 'status')} hasFilter={filters[colStatus || '']?.length > 0}>
                     <FilterDropdownContent col={colStatus || ''} values={uniqueValuesMap[colStatus || '']} filters={filters} toggle={toggleFilter} counts={filterCounts[colStatus || '']} />
                   </HeaderCell>
                   <th className="px-4 py-4 font-black text-slate-400 uppercase tracking-widest">Produto</th>
-                  <HeaderCell label="UTM SOURCE" width="110px" active={activeHeaderFilter === 'source'} onClick={() => setActiveHeaderFilter(activeHeaderFilter === 'source' ? null : 'source')} hasFilter={filters[colSource || '']?.length > 0}>
+                  <HeaderCell label="SOURCE" width="110px" active={activeHeaderFilter === 'source'} onClick={() => setActiveHeaderFilter(activeHeaderFilter === 'source' ? null : 'source')} hasFilter={filters[colSource || '']?.length > 0}>
                     <FilterDropdownContent col={colSource || ''} values={uniqueValuesMap[colSource || '']} filters={filters} toggle={toggleFilter} counts={filterCounts[colSource || '']} />
                   </HeaderCell>
-                  <HeaderCell label="UTM CAMPAIGN" active={activeHeaderFilter === 'campanha'} onClick={() => setActiveHeaderFilter(activeHeaderFilter === 'campanha' ? null : 'campanha')} hasFilter={filters[colCampaign || '']?.length > 0}>
+                  <HeaderCell label="CAMPAIGN" active={activeHeaderFilter === 'campanha'} onClick={() => setActiveHeaderFilter(activeHeaderFilter === 'campanha' ? null : 'campanha')} hasFilter={filters[colCampaign || '']?.length > 0}>
                     <FilterDropdownContent col={colCampaign || ''} values={uniqueValuesMap[colCampaign || '']} filters={filters} toggle={toggleFilter} counts={filterCounts[colCampaign || '']} />
                   </HeaderCell>
-                  <HeaderCell label="UTM CONTENT" active={activeHeaderFilter === 'content'} onClick={() => setActiveHeaderFilter(activeHeaderFilter === 'content' ? null : 'content')} hasFilter={filters[colContent || '']?.length > 0}>
-                    <FilterDropdownContent col={colContent || ''} values={uniqueValuesMap[colContent || '']} filters={filters} toggle={toggleFilter} counts={filterCounts[colContent || '']} />
-                  </HeaderCell>
-                  <th className="px-4 py-4 font-black text-slate-400 uppercase tracking-widest text-center">Vendas</th>
-                  <th className="px-4 py-4 font-black text-slate-400 uppercase tracking-widest">Faturamento</th>
-                  <th className="px-4 py-4 font-black text-indigo-600 uppercase tracking-widest">Invest. Total</th>
-                  <th className="px-4 py-4 font-black text-amber-600 uppercase tracking-widest">Impostos (6%)</th>
-                  <th className="px-4 py-4 font-black text-slate-400 uppercase tracking-widest">CPA Real</th>
+                  <th className="px-4 py-4 font-black text-slate-400 uppercase tracking-widest text-center">Vendas (Apr)</th>
+                  <th className="px-4 py-4 font-black text-slate-400 uppercase tracking-widest">Faturamento (Apr)</th>
+                  <th className="px-4 py-4 font-black text-indigo-600 uppercase tracking-widest">Invest.</th>
                   <th className="px-4 py-4 font-black text-slate-400 uppercase tracking-widest text-right pr-6">ROI</th>
                 </tr>
               </thead>
@@ -479,59 +466,35 @@ const Dashboard: React.FC<DashboardProps> = ({
                   const investment = groupInvestments[group.key] || 0;
                   const rowTaxes = group.faturamento * 0.06;
                   const totalRowCost = investment + rowTaxes;
-                  const cpa = group.vendas > 0 ? totalRowCost / group.vendas : 0;
                   const roi = totalRowCost > 0 ? group.faturamento / totalRowCost : 0;
-                  
                   const hasProfit = investment > 0 && totalRowCost > 0 && group.faturamento > totalRowCost;
                   const isLoss = investment > 0 && totalRowCost > 0 && group.faturamento <= totalRowCost;
-                  
                   const productNames = Object.keys(group.productsMap);
                   const isMultipleProducts = productNames.length > 1;
-                  const mainProduct = isMultipleProducts ? `${productNames.length} Produtos Diferentes` : productNames[0];
+                  const mainProduct = isMultipleProducts ? `${productNames.length} Produtos` : productNames[0];
 
                   return (
                     <tr key={group.key} className={`transition-colors ${hasProfit ? 'bg-emerald-50/30' : isLoss ? 'bg-rose-50/30' : 'hover:bg-slate-50'}`}>
-                      <td className="px-4 py-4 text-slate-400 font-bold leading-tight">{group.minDate} <br/> {group.maxDate}</td>
-                      <td className="px-4 py-4 font-black">
+                      <td className="px-4 py-4 text-slate-400 font-bold leading-tight">{group.minDate}<br/>{group.maxDate}</td>
+                      <td className="px-4 py-4">
                         <div className="flex flex-wrap gap-1 max-w-[120px]">
-                           {Object.entries(group.statusMap).map(([s, count]: any) => (
-                             <span key={s} className="px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded text-[8px] font-black uppercase whitespace-nowrap">
-                               {s}: {count}
-                             </span>
-                           ))}
+                           {Object.entries(group.statusMap).map(([s, count]: any) => {
+                             const approved = isApproved(s);
+                             return (
+                               <span key={s} className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase whitespace-nowrap ${approved ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'}`}>
+                                 {s.substring(0,6)}: {count}
+                               </span>
+                             );
+                           })}
                         </div>
                       </td>
                       <td className="px-4 py-4 font-black text-slate-700 relative">
                         <div className="flex items-center gap-2 group">
-                          <span className={`${isMultipleProducts ? 'text-indigo-600 underline decoration-dotted' : ''}`}>{mainProduct}</span>
-                          <button onClick={() => setActiveProductPopup(activeProductPopup === group.key ? null : group.key)} className="p-1 hover:bg-indigo-100 rounded-md transition-colors text-indigo-400">
-                            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${activeProductPopup === group.key ? 'rotate-180' : ''}`} />
-                          </button>
+                          <span className="truncate max-w-[150px]">{mainProduct}</span>
                         </div>
-                        {activeProductPopup === group.key && (
-                          <div className="absolute top-full left-4 mt-1 bg-white border border-slate-200 shadow-2xl rounded-2xl p-4 z-50 min-w-[240px] animate-in fade-in zoom-in duration-150 origin-top-left">
-                            <div className="flex items-center justify-between mb-3 border-b border-slate-50 pb-2">
-                              <span className="text-[10px] font-black uppercase text-slate-400">Distribuição por Produto</span>
-                              <button onClick={() => setActiveProductPopup(null)}><X className="w-3 h-3 text-slate-300" /></button>
-                            </div>
-                            <div className="space-y-2">
-                              {Object.entries(group.productsMap).map(([name, count]: any) => (
-                                <div key={name} className="flex items-center justify-between">
-                                  <span className="text-[11px] font-bold text-slate-600 truncate max-w-[150px]">{name}</span>
-                                  <span className="text-[11px] font-black text-indigo-600">{count} vds</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
                       </td>
-                      <td className="px-4 py-4 font-bold text-indigo-500 uppercase">
-                        <div className="max-w-[100px] truncate" title={group.source}>{group.source}</div>
-                      </td>
-                      <td className="px-4 py-4 font-medium text-slate-600 max-w-[200px] truncate" title={group.campanha}>{group.campanha}</td>
-                      <td className="px-4 py-4 font-medium text-slate-400 max-w-[150px] truncate" title={Array.from(group.contents).join(', ')}>
-                        {Array.from(group.contents).join(', ')}
-                      </td>
+                      <td className="px-4 py-4 font-bold text-indigo-500 uppercase">{group.source}</td>
+                      <td className="px-4 py-4 font-medium text-slate-600 truncate max-w-[150px]">{group.campanha}</td>
                       <td className="px-4 py-4 font-black text-indigo-600 text-center text-xl tracking-tighter">{group.vendas}</td>
                       <td className="px-4 py-4 font-black text-slate-800">{formatBRL(group.faturamento)}</td>
                       <td className="px-4 py-4">
@@ -540,11 +503,9 @@ const Dashboard: React.FC<DashboardProps> = ({
                           <input type="number" className="bg-transparent border-none outline-none w-16 text-[11px] font-black text-slate-800 p-0" value={groupInvestments[group.key] || ''} onChange={(e) => setGroupInvestments(prev => ({ ...prev, [group.key]: Number(e.target.value) }))} placeholder="0,00" />
                         </div>
                       </td>
-                      <td className="px-4 py-4 font-black text-amber-600/80">{formatBRL(rowTaxes)}</td>
-                      <td className="px-4 py-4 font-black text-slate-800">{formatBRL(cpa)}</td>
                       <td className="px-4 py-4 text-right pr-6">
                         {investment === 0 ? (
-                          <span className="inline-block px-4 py-1.5 bg-slate-100 text-slate-400 rounded-full font-black text-[9px] uppercase tracking-wider">Pendente</span>
+                          <span className="inline-block px-4 py-1.5 bg-slate-100 text-slate-400 rounded-full font-black text-[9px] uppercase tracking-wider">Invest.</span>
                         ) : (
                           <span className={`inline-block px-4 py-1.5 rounded-full font-black text-[10px] uppercase tracking-wider shadow-sm ${roi >= 1 ? 'bg-emerald-500 text-white' : 'bg-rose-500 text-white'}`}>{roi.toFixed(2)}x ROI</span>
                         )}
@@ -561,12 +522,12 @@ const Dashboard: React.FC<DashboardProps> = ({
       {viewMode === 'graphs' && (
         <div className="space-y-8 animate-in fade-in duration-500 w-full">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <SummaryCard label="HOJE" value={periodStats.today} color="text-indigo-600" iconColor="bg-indigo-50 text-indigo-500" />
-            <SummaryCard label="7 DIAS" value={periodStats.d7} color="text-emerald-500" iconColor="bg-emerald-50 text-emerald-500" />
-            <SummaryCard label="30 DIAS" value={periodStats.d30} color="text-amber-500" iconColor="bg-amber-50 text-amber-500" />
+            <SummaryCard label="HOJE (APROVADO)" value={periodStats.today} color="text-indigo-600" iconColor="bg-indigo-50 text-indigo-500" />
+            <SummaryCard label="7 DIAS (APROVADO)" value={periodStats.d7} color="text-emerald-500" iconColor="bg-emerald-50 text-emerald-500" />
+            <SummaryCard label="30 DIAS (APROVADO)" value={periodStats.d30} color="text-amber-500" iconColor="bg-amber-50 text-amber-500" />
           </div>
           <div className="bg-white p-8 rounded-[40px] border border-slate-100 shadow-sm w-full">
-            <div className="flex items-center space-x-2 mb-10"><TrendingUp className="w-5 h-5 text-indigo-500" /><h4 className="text-xs font-black text-slate-800 uppercase tracking-widest">Evolução de Vendas</h4></div>
+            <div className="flex items-center space-x-2 mb-10"><TrendingUp className="w-5 h-5 text-indigo-500" /><h4 className="text-xs font-black text-slate-800 uppercase tracking-widest">Evolução de Vendas Aprovadas</h4></div>
             <div className="h-[400px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={evolutionData}>
@@ -574,16 +535,16 @@ const Dashboard: React.FC<DashboardProps> = ({
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 700}} dy={10} />
                   <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 700}} />
-                  <Tooltip contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} labelStyle={{fontWeight: 900, marginBottom: '4px'}} />
+                  <Tooltip contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} />
                   <Area type="monotone" dataKey="count" stroke="#6366f1" strokeWidth={4} fillOpacity={1} fill="url(#colorCount)" dot={{r: 4, fill: '#6366f1', strokeWidth: 2, stroke: '#fff'}} activeDot={{r: 6, strokeWidth: 0}} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full">
-            <DonutChartCard title="CAMPANHAS (TOP 5)" data={top5Campaigns} icon={<Target className="w-4 h-4" />} />
-            <DonutChartCard title="SOURCES (TOP 5)" data={top5Source} icon={<Layers className="w-4 h-4" />} />
-            <DonutChartCard title="PRODUTOS (TOP 5)" data={top5Products} icon={<Receipt className="w-4 h-4" />} />
+            <DonutChartCard title="CAMPANHAS APROVADAS (TOP 5)" data={top5Campaigns} icon={<Target className="w-4 h-4" />} />
+            <DonutChartCard title="SOURCES APROVADAS (TOP 5)" data={top5Source} icon={<Layers className="w-4 h-4" />} />
+            <DonutChartCard title="PRODUTOS APROVADOS (TOP 5)" data={top5Products} icon={<Receipt className="w-4 h-4" />} />
           </div>
         </div>
       )}
@@ -596,16 +557,11 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl"><History className="w-5 h-5" /></div>
                 <div>
                   <h4 className="text-lg font-black text-slate-800 tracking-tighter uppercase">Histórico de Importações</h4>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Gerencie os dados salvos localmente</p>
                 </div>
               </div>
             </div>
-
             {history.length === 0 ? (
-              <div className="py-20 text-center space-y-4">
-                <div className="inline-flex p-4 bg-slate-50 text-slate-300 rounded-full mb-2"><History className="w-12 h-12" /></div>
-                <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest">Nenhum registro encontrado</p>
-              </div>
+              <div className="py-20 text-center text-slate-400 font-bold uppercase text-[10px] tracking-widest">Nenhum registro encontrado</div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {history.map((item) => (
@@ -615,32 +571,19 @@ const Dashboard: React.FC<DashboardProps> = ({
                         <h5 className="font-black text-slate-800 text-sm truncate mb-1" title={item.name}>{item.name}</h5>
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{new Date(item.timestamp).toLocaleString('pt-BR')}</p>
                       </div>
-                      <button 
-                        onClick={() => onDeleteFromHistory?.(item.id)}
-                        className="p-2 text-slate-300 hover:text-rose-500 transition-colors bg-white rounded-xl border border-slate-100 shadow-sm"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <button onClick={() => onDeleteFromHistory?.(item.id)} className="p-2 text-slate-300 hover:text-rose-500 transition-colors bg-white rounded-xl border border-slate-100"><Trash2 className="w-4 h-4" /></button>
                     </div>
-                    
                     <div className="grid grid-cols-2 gap-4 mb-8">
                       <div className="bg-white p-3 rounded-2xl border border-slate-100">
-                        <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Vendas</p>
+                        <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Registros</p>
                         <p className="text-lg font-black text-indigo-600 tracking-tighter">{item.stats.vendas}</p>
                       </div>
                       <div className="bg-white p-3 rounded-2xl border border-slate-100">
-                        <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Total</p>
+                        <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Faturamento Total</p>
                         <p className="text-sm font-black text-slate-800 tracking-tighter truncate">{formatBRL(item.stats.faturamento)}</p>
                       </div>
                     </div>
-
-                    <button 
-                      onClick={() => onLoadFromHistory?.(item)}
-                      className="w-full py-3.5 bg-white border border-slate-200 text-slate-600 font-black text-[10px] uppercase tracking-widest rounded-2xl hover:bg-indigo-600 hover:text-white hover:border-indigo-600 transition-all flex items-center justify-center gap-2 group-hover:shadow-lg group-hover:scale-[1.02]"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      Visualizar Dados
-                    </button>
+                    <button onClick={() => onLoadFromHistory?.(item)} className="w-full py-3.5 bg-white border border-slate-200 text-slate-600 font-black text-[10px] uppercase tracking-widest rounded-2xl hover:bg-indigo-600 hover:text-white transition-all">Visualizar Dados</button>
                   </div>
                 ))}
               </div>
@@ -651,6 +594,8 @@ const Dashboard: React.FC<DashboardProps> = ({
     </div>
   );
 };
+
+// Componentes Auxiliares (HeaderCell, FilterDropdownContent, SummaryCard, DonutChartCard, FilterColumn, StatCard) - Mantidos de acordo com estrutura anterior
 
 const HeaderCell = ({ label, children, active, onClick, hasFilter, width }: any) => {
   const ref = useRef<HTMLTableHeaderCellElement>(null);
@@ -677,7 +622,7 @@ const FilterDropdownContent = ({ col, values, filters, toggle, counts }: any) =>
           <button key={val} onClick={() => toggle(col, val)} className={`w-full text-left px-3 py-2 rounded-lg text-[10px] font-bold flex items-center justify-between transition-colors ${filters[col]?.includes(val) ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}>
             <div className="flex flex-col truncate flex-1">
               <span className="truncate">{val}</span>
-              <span className="text-[8px] opacity-60 uppercase">{counts?.[val] || 0} vendas</span>
+              <span className="text-[8px] opacity-60 uppercase">{counts?.[val] || 0} registros</span>
             </div>
             {filters[col]?.includes(val) && <CheckCircle2 className="w-3 h-3 ml-2 text-indigo-600" />}
           </button>
@@ -697,7 +642,7 @@ const SummaryCard = ({ label, value, color, iconColor }: any) => (
 const DonutChartCard = ({ title, data, icon }: any) => (
   <div className="bg-white p-7 rounded-[40px] border border-slate-100 shadow-sm flex flex-col h-full">
     <div className="flex items-center space-x-2 mb-8"><div className="p-1.5 bg-slate-50 text-slate-400 rounded-lg">{icon}</div><h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{title}</h4></div>
-    <div className="h-[200px] mb-8"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={data} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">{data.map((_: any, index: number) => (<Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} strokeWidth={0} />))}</Pie><Tooltip contentStyle={{borderRadius: '12px', border: 'none', fontSize: '10px'}} /></PieChart></ResponsiveContainer></div>
+    <div className="h-[200px] mb-8"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={data} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">{data.map((_: any, index: number) => (<Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} strokeWidth={0} />))}</Pie><Tooltip /></PieChart></ResponsiveContainer></div>
     <div className="flex flex-wrap gap-x-4 gap-y-2 justify-start">{data.map((entry: any, index: number) => (<div key={entry.name} className="flex items-center space-x-2"><div className="w-3 h-3 rounded-full" style={{backgroundColor: PIE_COLORS[index % PIE_COLORS.length]}} /><span className="text-[9px] font-bold text-slate-500 truncate max-w-[120px]">{entry.name}</span></div>))}</div>
   </div>
 );
@@ -717,7 +662,7 @@ const FilterColumn = ({ col, uniqueValues, filters, toggleFilter, counts }: any)
               <div className="flex flex-col flex-1 truncate">
                 <span className="truncate">{val}</span>
                 <span className={`text-[9px] font-black uppercase tracking-tighter mt-0.5 ${isSelected ? 'text-indigo-200' : 'text-slate-400'}`}>
-                  {count} {count === 1 ? 'Venda' : 'Vendas'}
+                  {count} registros
                 </span>
               </div>
               {isSelected && <CheckCircle2 className="w-3.5 h-3.5 ml-2 flex-shrink-0" />}

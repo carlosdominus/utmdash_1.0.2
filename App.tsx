@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { BrainCircuit, RefreshCw, Link, Link2Off, LayoutGrid, Layers, BarChart3, History as HistoryIcon } from 'lucide-react';
+import { BrainCircuit, RefreshCw, Link, Link2Off, LayoutGrid, Layers, BarChart3, History as HistoryIcon, Zap } from 'lucide-react';
 import { DashboardData, DataRow, ViewMode, HistoryEntry } from './types';
 import Dashboard from './components/Dashboard';
 import { analyzeDataWithGemini } from './services/geminiService';
@@ -41,6 +41,8 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('utmdash_linked_filters');
     return saved === null ? true : saved === 'true';
   });
+
+  const API_SHEET_URL = "https://docs.google.com/spreadsheets/d/15oD6AxYq-PXl5Rk5A-Mly-ESEdcb5BN3gSsoVO9k2xQ/export?format=csv";
 
   useEffect(() => {
     localStorage.setItem('utmdash_linked_filters', linkedFilters.toString());
@@ -141,23 +143,24 @@ const App: React.FC = () => {
     reader.readAsText(file);
   };
 
-  const loadFromUrl = async () => {
-    if (!sheetUrl) return;
+  const loadFromUrl = async (customUrl?: string) => {
+    const target = customUrl || sheetUrl;
+    if (!target) return;
     setLoading(true);
     try {
-      let targetUrl = sheetUrl;
-      if (sheetUrl.includes('/edit')) {
-        targetUrl = sheetUrl.replace(/\/edit.*$/, '/export?format=csv');
+      let finalUrl = target;
+      if (target.includes('/edit')) {
+        finalUrl = target.replace(/\/edit.*$/, '/export?format=csv');
       }
-      const response = await fetch(targetUrl);
+      const response = await fetch(finalUrl);
       const csvText = await response.text();
       const parsed = parseCSV(csvText);
       if (parsed) {
         setData(parsed);
-        addToHistory(parsed, "Planilha via Link");
+        addToHistory(parsed, customUrl ? "Integração API" : "Planilha via Link");
       }
     } catch (error) {
-      alert("Erro ao carregar link. Certifique-se de que a planilha está 'Publicada na Web' como CSV.");
+      alert("Erro ao carregar link. Certifique-se de que a planilha está 'Publicada na Web' como CSV ou disponível publicamente.");
     } finally {
       setLoading(false);
     }
@@ -236,26 +239,43 @@ const App: React.FC = () => {
             <h2 className="text-3xl font-black mb-2 text-slate-800 tracking-tighter">utmdash & Perfect Pay</h2>
             <p className="text-slate-500 mb-10 max-w-sm text-center font-medium">Análise de ROI e Gestão de Tráfego nativa para relatórios Perfect Pay.</p>
             <div className="w-full max-w-md space-y-4 px-6">
-              <input
-                type="text"
-                placeholder="Link CSV da Perfect Pay / Google Sheets"
-                className="w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium"
-                value={sheetUrl}
-                onChange={(e) => setSheetUrl(e.target.value)}
-              />
               <button
-                onClick={loadFromUrl}
-                disabled={loading || !sheetUrl}
-                className="w-full py-4 bg-indigo-600 text-white font-black rounded-2xl hover:bg-indigo-700 transition-all flex items-center justify-center disabled:opacity-50"
+                onClick={() => loadFromUrl(API_SHEET_URL)}
+                disabled={loading}
+                className="w-full py-5 bg-indigo-600 text-white font-black rounded-2xl hover:bg-indigo-700 transition-all flex items-center justify-center disabled:opacity-50 shadow-lg shadow-indigo-100 text-lg uppercase tracking-tight"
               >
-                {loading ? 'SINCRONIZANDO...' : 'CONECTAR VENDAS'}
+                {loading ? 'CONECTANDO...' : (
+                  <>
+                    <Zap className="w-6 h-6 mr-2 fill-current" />
+                    CONECTAR COM API
+                  </>
+                )}
               </button>
+
               <div className="relative py-4">
                 <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200"></div></div>
-                <div className="relative flex justify-center text-xs font-bold uppercase tracking-widest text-slate-400"><span className="px-2 bg-white">OU</span></div>
+                <div className="relative flex justify-center text-[10px] font-bold uppercase tracking-widest text-slate-400"><span className="px-3 bg-white">Outros métodos</span></div>
               </div>
-              <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-indigo-100 border-dashed rounded-2xl cursor-pointer bg-indigo-50/30 hover:bg-indigo-50 transition-all">
-                <span className="text-xs font-bold text-indigo-600 uppercase tracking-widest">Importar Arquivo .csv</span>
+
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="URL Google Sheets"
+                  className="flex-1 px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium text-sm"
+                  value={sheetUrl}
+                  onChange={(e) => setSheetUrl(e.target.value)}
+                />
+                <button
+                  onClick={() => loadFromUrl()}
+                  disabled={loading || !sheetUrl}
+                  className="px-6 py-4 bg-slate-800 text-white font-black rounded-2xl hover:bg-slate-900 transition-all disabled:opacity-50 uppercase text-[10px]"
+                >
+                  IMPORTAR
+                </button>
+              </div>
+
+              <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-indigo-100 border-dashed rounded-2xl cursor-pointer bg-indigo-50/30 hover:bg-indigo-50 transition-all">
+                <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">Enviar arquivo local (.csv)</span>
                 <input type="file" className="hidden" accept=".csv" onChange={handleFileUpload} />
               </label>
               
@@ -267,14 +287,14 @@ const App: React.FC = () => {
                       <div key={item.id} className="flex items-center justify-between p-4 bg-slate-50 border border-slate-100 rounded-2xl group hover:border-indigo-200 transition-all">
                         <div className="flex flex-col">
                           <span className="text-xs font-black text-slate-700">{item.name}</span>
-                          <span className="text-[10px] text-slate-400 font-bold">{new Date(item.timestamp).toLocaleDateString()} • {item.stats.vendas} vendas</span>
+                          <span className="text-[10px] text-slate-400 font-bold">{new Date(item.timestamp).toLocaleDateString()} • {item.stats.vendas} registros</span>
                         </div>
                         <div className="flex items-center space-x-2">
                            <button 
                             onClick={() => loadFromHistory(item)}
                             className="px-3 py-1.5 bg-indigo-600 text-white text-[10px] font-black uppercase rounded-lg hover:bg-indigo-700 transition-all"
                           >
-                            Carregar
+                            Abrir
                           </button>
                           <button 
                             onClick={() => deleteFromHistory(item.id)}
